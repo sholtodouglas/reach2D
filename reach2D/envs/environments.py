@@ -299,6 +299,7 @@ class Reacher(MJCFBasedRobot):
 		target_x, _ = self.jdict["target_x"].current_position()
 		target_y, _ = self.jdict["target_y"].current_position()
 		self.to_target_vec = np.array(self.fingertip.pose().xyz()) - np.array(self.target.pose().xyz())
+		
 		return np.array([
 			target_x,
 			target_y,
@@ -449,7 +450,7 @@ class Camera:
 
 	def move_and_look_at(self,i,j,k,x,y,z):
 		lookat = [x,y,z]
-		distance = 0.5
+		distance = 0.3
 		yaw = 0
 		self._p.resetDebugVisualizerCamera(distance, yaw, -50, lookat)
 
@@ -549,9 +550,11 @@ class ReacherBulletEnv(MJCFBaseBulletEnv):
 			- 0.01 * (np.abs(a[0]) + np.abs(a[1]))  # stall torque require some energy
 		)
 		stuck_joint_cost = -0.1 if np.abs(np.abs(self.robot.gamma) - 1) < 0.01 else 0.0
-		self.rewards = [float(self.potential - potential_old), float(electricity_cost), float(stuck_joint_cost)]
+		#self.rewards = [float(self.potential - potential_old), float(electricity_cost), float(stuck_joint_cost)]
+		self.rewards = sum([float(self.potential - potential_old), float(stuck_joint_cost)])
+		print(self.rewards)
 		self.HUD(state, a, False)
-		return state, sum(self.rewards), False, {}
+		return state, self.rewards, False, {}
 
 	def camera_adjust(self):
 		x, y, z = self.robot.fingertip.pose().xyz()

@@ -269,18 +269,16 @@ class Joint:
 		self._p.setJointMotorControl2(self.bodies[self.bodyIndex],self.jointIndex,controlMode=pybullet.POSITION_CONTROL, targetPosition=0, targetVelocity=0, positionGain=0.1, velocityGain=0.1, force=0)
 
 
-
+########################################################################################################################################################################################
 class Reacher(MJCFBasedRobot):
-	TARG_LIMIT = 0.27
+	TARG_LIMIT = 0.15
+	TARG_MIN = 0.08
 
 	def __init__(self):
 		MJCFBasedRobot.__init__(self, 'reacher.xml', 'body0', action_dim=2, obs_dim=9)
 
 	def robot_specific_reset(self, bullet_client):
-		self.jdict["target_x"].reset_current_position(
-			self.np_random.uniform(low=-self.TARG_LIMIT, high=self.TARG_LIMIT), 0)
-		self.jdict["target_y"].reset_current_position(
-			self.np_random.uniform(low=-self.TARG_LIMIT, high=self.TARG_LIMIT), 0)
+		self.reset_goal()
 		self.fingertip = self.parts["fingertip"]
 		self.target = self.parts["target"]
 		self.central_joint = self.jdict["joint0"]
@@ -298,6 +296,7 @@ class Reacher(MJCFBasedRobot):
 		self.gamma, self.gamma_dot = self.elbow_joint.current_relative_position()
 		target_x, _ = self.jdict["target_x"].current_position()
 		target_y, _ = self.jdict["target_y"].current_position()
+		#print(self.fingertip.pose().xyz())
 		self.to_target_vec = np.array(self.fingertip.pose().xyz()) - np.array(self.target.pose().xyz())
 		
 		return np.array([
@@ -312,11 +311,23 @@ class Reacher(MJCFBasedRobot):
 			self.gamma_dot,
 		])
 
+	def reset_goal(self):
+		def crop(num, lim):
+			if num >= 0 and num < lim:
+				num = lim
+			elif num < 0 and num > -lim:
+				num = -lim
+			return num
+		x  = crop(self.np_random.uniform(low=-self.TARG_LIMIT, high=self.TARG_LIMIT), self.TARG_MIN)
+		y  = crop(self.np_random.uniform(low=-self.TARG_LIMIT, high=self.TARG_LIMIT), self.TARG_MIN) 
+		self.jdict["target_x"].reset_current_position(x, 0)
+		self.jdict["target_y"].reset_current_position(y, 0)
+
 	def calc_potential(self):
 		return -100 * np.linalg.norm(self.to_target_vec)
 
 
-
+########################################################################################################################################################################################
 class MJCFBaseBulletEnv(gym.Env):
 	"""
 	Base class for Bullet physics simulation loading MJCF (MuJoCo .xml) environments in a Scene.
@@ -531,6 +542,7 @@ class ReacherBulletEnv(MJCFBaseBulletEnv):
 	def __init__(self):
 		self.robot = Reacher()
 		MJCFBaseBulletEnv.__init__(self, self.robot)
+		self.move_goal = False
 
 	def create_single_player_scene(self, bullet_client):
 		return SingleRobotEmptyScene(bullet_client, gravity=0.0, timestep=0.0165, frame_skip=1)
@@ -545,16 +557,28 @@ class ReacherBulletEnv(MJCFBaseBulletEnv):
 		potential_old = self.potential
 		self.potential = self.robot.calc_potential()
 
+		if self.move_goal:
+			if self.potential > -8.0:
+				self.reset_goal()
+
 		electricity_cost = (
 			-0.10 * (np.abs(a[0] * self.robot.theta_dot) + np.abs(a[1] * self.robot.gamma_dot))  # work torque*angular_velocity
 			- 0.01 * (np.abs(a[0]) + np.abs(a[1]))  # stall torque require some energy
 		)
 		stuck_joint_cost = -0.1 if np.abs(np.abs(self.robot.gamma) - 1) < 0.01 else 0.0
-		#self.rewards = [float(self.potential - potential_old), float(electricity_cost), float(stuck_joint_cost)]
-		self.rewards = sum([float(self.potential - potential_old), float(stuck_joint_cost)])
-		print(self.rewards)
+		self.rewards = sum([float(self.potential - potential_old), float(electricity_cost), 5*float(stuck_joint_cost)])
+		#self.rewards = sum([float(self.potential - potential_old), float(stuck_joint_cost)])
+		#self.rewards = sum([float(self.potential), float(stuck_joint_cost)])
+		
 		self.HUD(state, a, False)
 		return state, self.rewards, False, {}
+
+	def reset_goal(self):
+		self.robot.reset_goal()
+
+	def activate_movable_goal(self):
+		self.move_goal = True
+
 
 	def camera_adjust(self):
 		x, y, z = self.robot.fingertip.pose().xyz()
